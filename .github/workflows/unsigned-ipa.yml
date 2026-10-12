@@ -1,0 +1,90 @@
+name: Unsigned iOS IPA
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v5
+        with:
+          ref: b996ab4d828a180ae4b23d0b07d045b3d318c34f
+      - name: Set up XcodeGen
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          xcrun swift --version
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          fi
+          xcodegen --version
+      - name: Generate Xcode project
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOCKFILE=vreader.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          cp "$LOCKFILE" "$RUNNER_TEMP/Package.resolved"
+          xcodegen generate --spec project.yml
+          mkdir -p "$(dirname "$LOCKFILE")" build
+          cp "$RUNNER_TEMP/Package.resolved" "$LOCKFILE"
+          xcodebuild -list -project vreader.xcodeproj \
+            -disableAutomaticPackageResolution \
+            -onlyUsePackageVersionsFromResolvedFile |& tee build/xcode-list.log
+      - name: Resolve Swift packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -resolvePackageDependencies \
+            -project vreader.xcodeproj -scheme vreader \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            -onlyUsePackageVersionsFromResolvedFile |& tee build/resolve.log
+      - name: Build unsigned iOS app
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project vreader.xcodeproj -scheme vreader \
+            -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            -disableAutomaticPackageResolution \
+            -onlyUsePackageVersionsFromResolvedFile \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO 'CODE_SIGN_IDENTITY=' \
+            |& tee build/build.log
+      - name: Package and validate unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_PATH="$GITHUB_WORKSPACE/build/DerivedData/Build/Products/Release-iphoneos/vreader.app"
+          IPA_PATH="$GITHUB_WORKSPACE/build/vreader-unsigned.ipa"
+          test -d "$APP_PATH"
+          test -s "$APP_PATH/vreader"
+          bash scripts/verify-release-no-debugbridge.sh "$APP_PATH"
+          mkdir -p build/ipa/Payload
+          ditto "$APP_PATH" build/ipa/Payload/vreader.app
+          (cd build/ipa && zip -qry "$IPA_PATH" Payload)
+          unzip -t "$IPA_PATH"
+          unzip -Z1 "$IPA_PATH" | grep -Fx 'Payload/vreader.app/Info.plist'
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-ipa
+          path: build/vreader-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-ipa-logs
+          path: build/*.log
+          if-no-files-found: ignore
+          retention-days: 7
