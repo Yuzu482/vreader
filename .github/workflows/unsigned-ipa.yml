@@ -36,7 +36,7 @@ jobs:
           cp "$RUNNER_TEMP/Package.resolved" "$LOCKFILE"
           xcodebuild -list -project vreader.xcodeproj \
             -disableAutomaticPackageResolution \
-            -onlyUsePackageVersionsFromResolvedFile |& tee build/xcode-list.log
+            -onlyUsePackageVersionsFromResolvedFile 2>&1 | tee build/xcode-list.log
       - name: Resolve Swift packages
         shell: bash
         run: |
@@ -44,7 +44,7 @@ jobs:
           xcodebuild -resolvePackageDependencies \
             -project vreader.xcodeproj -scheme vreader \
             -clonedSourcePackagesDirPath build/SourcePackages \
-            -onlyUsePackageVersionsFromResolvedFile |& tee build/resolve.log
+            -onlyUsePackageVersionsFromResolvedFile 2>&1 | tee build/resolve.log
       - name: Build unsigned iOS app
         shell: bash
         run: |
@@ -58,7 +58,7 @@ jobs:
             -disableAutomaticPackageResolution \
             -onlyUsePackageVersionsFromResolvedFile \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO 'CODE_SIGN_IDENTITY=' \
-            |& tee build/build.log
+            2>&1 | tee build/build.log
       - name: Package and validate unsigned IPA
         shell: bash
         run: |
